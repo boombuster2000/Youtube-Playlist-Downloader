@@ -95,15 +95,7 @@ def fetch_youtube_playlist_items(api_key, playlist_id):
 
     return video_urls
 
-
-def download_mp3(url):
-    check_database_url = "https://cnvmp3.com/check_database.php"
-    video_id = extract_youtube_video_id(url)
-
-    if not video_id:
-        raise ValueError("Invalid YouTube URL. Could not extract video ID.")
-
-    print(video_id)
+def get_check_database_response(check_database_url, video_id):
     params = {
         "formatValue": 1,
         "quality": 0,
@@ -116,13 +108,62 @@ def download_mp3(url):
         raise Exception(f"Check Database Error: {response.text}")
 
     try:
-        data = response.json()
+        return response.json()
     except json.JSONDecodeError:
         print("Error: Received non-JSON response:")
         print("Response content:\n", response.text)
         return
 
-    print("Response JSON:\n", data)
+def download_mp3(url, filename=None, folder="downloads"):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/114.0.0.0 Safari/537.36",
+        "Referer": "https://cnvmp3.com/"
+    }
+
+    response = requests.get(url, headers=headers, stream=True)
+
+    if response.status_code != 200:
+        raise Exception(f"Failed to download MP3. Status: {response.status_code}\n\n{response.text[:300]}")
+
+    if filename is None:
+        filename = os.path.basename(url.split("?")[0])
+        
+    if not filename.endswith(".mp3"):
+        filename += ".mp3"
+
+    os.makedirs(folder, exist_ok=True)
+    file_path = os.path.join(folder, filename)
+
+    with open(file_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                f.write(chunk)
+
+    print(f"✅ Saved: {file_path}")
+
+    
+
+
+
+def _download_mp3(url):
+    check_database_url = "https://cnvmp3.com/check_database.php"
+    video_id = extract_youtube_video_id(url)
+
+    if not video_id:
+        raise ValueError("Invalid YouTube URL. Could not extract video ID.")
+
+    check_database_response = get_check_database_response(check_database_url, video_id)   
+
+    if not check_database_response:
+        return
+
+    if check_database_response["success"]:
+        download_url = check_database_response["data"]["server_path"]
+        print(download_url)
+        download_mp3(download_url, check_database_response["data"]["title"])
+    
 
     
 
@@ -142,4 +183,4 @@ def main():
 
 if __name__ == '__main__':
     #main()
-    download_mp3("https://www.youtube.com/watch?v=99l4Z0Rwanw")
+    _download_mp3("https://www.youtube.com/watch?v=oGIBZ-dc8GE")
