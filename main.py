@@ -1,10 +1,34 @@
 import os
 import json
-import requests
+import stealth_requests as requests
 from urllib.parse import urlparse, parse_qs
+from typing import Optional
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
 
+
+def extract_youtube_video_id(url: str) -> Optional[str]:
+    """
+    Extracts the video ID from a YouTube URL using urllib.parse.
+
+    Supports:
+    - https://www.youtube.com/watch?v=VIDEO_ID
+    - https://youtu.be/VIDEO_ID
+    - https://www.youtube.com/embed/VIDEO_ID
+    """
+    parsed = urlparse(url)
+
+    if parsed.hostname in ('youtu.be',):
+        return parsed.path.lstrip('/')
+
+    if parsed.hostname in ('www.youtube.com', 'youtube.com'):
+        if parsed.path == '/watch':
+            query = parse_qs(parsed.query)
+            return query.get('v', [None])[0]
+        elif parsed.path.startswith('/embed/'):
+            return parsed.path.split('/')[2]
+
+    return None
 
 def load_api_key():
     PLACEHOLDER_KEY = 'YOUR_YOUTUBE_API_KEY'
@@ -72,6 +96,36 @@ def fetch_youtube_playlist_items(api_key, playlist_id):
     return video_urls
 
 
+def download_mp3(url):
+    check_database_url = "https://cnvmp3.com/check_database.php"
+    video_id = extract_youtube_video_id(url)
+
+    if not video_id:
+        raise ValueError("Invalid YouTube URL. Could not extract video ID.")
+
+    print(video_id)
+    params = {
+        "formatValue": 1,
+        "quality": 0,
+        "youtube_id": video_id
+    }
+
+    response = requests.post(check_database_url, json=params)
+
+    if response.status_code != 200:
+        raise Exception(f"Check Database Error: {response.text}")
+
+    try:
+        data = response.json()
+    except json.JSONDecodeError:
+        print("Error: Received non-JSON response:")
+        print("Response content:\n", response.text)
+        return
+
+    print("Response JSON:\n", data)
+
+    
+
 def main():
     try:
         api_key = load_api_key()
@@ -87,4 +141,5 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    #main()
+    download_mp3("https://www.youtube.com/watch?v=99l4Z0Rwanw")
