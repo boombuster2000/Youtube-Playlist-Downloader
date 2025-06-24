@@ -293,8 +293,6 @@ def main() -> None:
         user_input = input("Enter playlist URL or ID: ").strip()
         playlist_id = extract_playlist_id_from_url(user_input)
         urls = fetch_youtube_playlist_items(api_key, playlist_id)
-
-        print(f"Loading...")
         playlist = preview_playlist_titles(urls, api_key)
 
         for index, (title, url) in enumerate(playlist, start=1):
