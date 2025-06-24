@@ -1,14 +1,13 @@
 import os
 import json
 import requests
+from urllib.parse import urlparse, parse_qs
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
-PLACEHOLDER_KEY = 'YOUR_YOUTUBE_API_KEY'
 
-# Replace with your actual playlist ID
-PLAYLIST_ID = 'PLNRYo12dBlpvomJ3XmNNVVZmQXQSLwWIE'
 
 def load_api_key():
+    PLACEHOLDER_KEY = 'YOUR_YOUTUBE_API_KEY'
     if not os.path.exists(CONFIG_FILE):
         default_config = {"apiKey": PLACEHOLDER_KEY}
         with open(CONFIG_FILE, 'w') as f:
@@ -24,6 +23,21 @@ def load_api_key():
         exit(1)
 
     return config['apiKey']
+
+
+def extract_playlist_id_from_url(input_str):
+    try:
+        parsed = urlparse(input_str)
+        if parsed.scheme and parsed.netloc:
+            qs = parse_qs(parsed.query)
+            playlist_id = qs.get('list', [None])[0]
+            if not playlist_id:
+                raise ValueError("Missing 'list' parameter in URL.")
+            return playlist_id
+        return input_str
+    except Exception as e:
+        raise ValueError(f"Invalid input: {e}")
+
 
 def fetch_youtube_playlist_items(api_key, playlist_id):
     next_page_token = ''
@@ -57,15 +71,20 @@ def fetch_youtube_playlist_items(api_key, playlist_id):
 
     return video_urls
 
+
 def main():
     try:
         api_key = load_api_key()
-        urls = fetch_youtube_playlist_items(api_key, PLAYLIST_ID)
+        user_input = input("Enter playlist URL or ID: ")
+        playlist_id = extract_playlist_id_from_url(user_input.strip())
+
+        urls = fetch_youtube_playlist_items(api_key, playlist_id)
         print(f"Fetched {len(urls)} videos:")
         for url in urls:
             print(url)
     except Exception as e:
         print("Error:", str(e))
+
 
 if __name__ == '__main__':
     main()
