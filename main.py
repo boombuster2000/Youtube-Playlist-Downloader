@@ -253,12 +253,12 @@ def main() -> None:
         playlist_id = extract_playlist_id_from_url(user_input)
         urls = fetch_youtube_playlist_items(api_key, playlist_id)
 
-        print(f"Fetched {len(urls)} videos:\n")
+        print(f"Loading...")
         playlist = preview_playlist_titles(urls)
 
         for index, (title, url) in enumerate(playlist, start=1):
             process_youtube_mp3_download(url)
-            
+
             if index % 5 == 0:
                 print("Cooling down...")
                 time.sleep(10)
