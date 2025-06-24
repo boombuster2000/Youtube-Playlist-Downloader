@@ -113,6 +113,7 @@ def get_check_database_response(url: str, video_id: str) -> Optional[dict]:
     if response.status_code != 200:
         raise Exception(f"Check Database Error: {response.text}")
 
+    time.sleep(random.uniform(2, 5))
     try:
         return response.json()
     except json.JSONDecodeError:
@@ -150,6 +151,7 @@ def download_mp3(url: str, filename: Optional[str] = None, folder: str = "downlo
                 progress.update(task, advance=len(chunk))
 
     console.print(f"✅ Saved: {file_path}", style="green")
+    time.sleep(random.uniform(2, 5))
 
 def get_video_data(url: str) -> dict:
     api_url = "https://cnvmp3.com/get_video_data.php"
@@ -158,6 +160,7 @@ def get_video_data(url: str) -> dict:
     if response.status_code != 200:
         raise Exception(f"Failed to get video data.\n{response.text}")
 
+    time.sleep(random.uniform(2, 5))
     return response.json()
 
 def download_video_ucep(url: str, title: str) -> dict:
@@ -177,6 +180,7 @@ def download_video_ucep(url: str, title: str) -> dict:
         print("Downloading")
         download_mp3(data["download_link"], title)
 
+    time.sleep(random.uniform(2, 5))
     return data
 
 def insert_to_database(video_url: str, download_url: str, title: str) -> dict:
@@ -199,6 +203,7 @@ def insert_to_database(video_url: str, download_url: str, title: str) -> dict:
         raise Exception(f"Failed to insert to database.\n{data['error']}")
 
     print("Inserted into database")
+    time.sleep(random.uniform(2, 5))
     return data
 
 def process_youtube_mp3_download(url: str) -> None:
@@ -253,7 +258,7 @@ def main() -> None:
 
         for index, (title, url) in enumerate(playlist, start=1):
             process_youtube_mp3_download(url)
-            time.sleep(random.uniform(2, 5))
+            
             if index % 5 == 0:
                 print("Cooling down...")
                 time.sleep(10)
