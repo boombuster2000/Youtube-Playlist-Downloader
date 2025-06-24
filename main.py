@@ -102,6 +102,51 @@ def fetch_youtube_playlist_items(api_key: str, playlist_id: str) -> list[str]:
 
     return video_urls
 
+def fetch_video_titles(api_key: str, video_urls: list[str]) -> list[tuple[str, str]]:
+    def extract_id(url):
+        parsed = urlparse(url)
+        if 'youtube.com' in parsed.netloc and parsed.path == '/watch':
+            return parse_qs(parsed.query).get('v', [None])[0]
+        elif 'youtu.be' in parsed.netloc:
+            return parsed.path.lstrip('/')
+        return None
+
+    # Build a mapping from video IDs to URLs; skip URLs with no valid ID.
+    id_map = {}
+    for url in video_urls:
+        video_id = extract_id(url)
+        if video_id is not None:
+            id_map[video_id] = url
+
+    # Collect only valid video IDs.
+    ids = list(id_map.keys())
+    titles = []
+
+    # Process in batches of 50.
+    for i in range(0, len(ids), 50):
+        batch = ids[i:i+50]
+        # Join the list of video IDs into a comma-separated string.
+        id_string = ",".join(batch)
+        response = requests.get(
+            "https://www.googleapis.com/youtube/v3/videos",
+            params={
+                "part": "snippet",
+                "id": id_string,
+                "key": api_key
+            }
+        )
+        if response.status_code != 200:
+            raise Exception(f"Failed to fetch video metadata: {response.text}")
+
+        data = response.json()
+        for item in data.get("items", []):
+            vid = item["id"]
+            title = item["snippet"]["title"]
+            titles.append((title, id_map[vid]))
+
+    return titles
+
+
 def get_check_database_response(url: str, video_id: str) -> Optional[dict]:
     params = {
         "formatValue": 1,
@@ -229,19 +274,15 @@ def process_youtube_mp3_download(url: str) -> None:
             ucep_resp = download_video_ucep(url, title)
             insert_to_database(url, ucep_resp["download_link"], title)
 
-def preview_playlist_titles(urls: list[str]) -> list[tuple[str, str]]:
-    preview_data = []
+def preview_playlist_titles(urls: list[str], api_key: str) -> list[tuple[str, str]]:
+    preview_data = fetch_video_titles(api_key, urls)
     table = Table(title="YouTube Playlist Download Queue")
     table.add_column("#", style="cyan", width=4)
     table.add_column("Title", style="bold")
     table.add_column("URL", style="magenta")
 
-    for idx, url in enumerate(urls, start=1):
-        data = get_video_data(url)
-        title = data.get("title", "Unknown") if data.get("success") else "Unavailable"
-        preview_data.append((title, url))
+    for idx, (title, url) in enumerate(preview_data, start=1):
         table.add_row(str(idx), title, url)
-        time.sleep(random.uniform(2, 5))
 
     console.print(table)
     return preview_data
@@ -254,7 +295,7 @@ def main() -> None:
         urls = fetch_youtube_playlist_items(api_key, playlist_id)
 
         print(f"Loading...")
-        playlist = preview_playlist_titles(urls)
+        playlist = preview_playlist_titles(urls, api_key)
 
         for index, (title, url) in enumerate(playlist, start=1):
             process_youtube_mp3_download(url)
@@ -265,7 +306,6 @@ def main() -> None:
 
     except Exception as e:
         print("Error:", str(e))
-
 
 if __name__ == '__main__':
     main()
