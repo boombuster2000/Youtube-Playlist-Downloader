@@ -1,21 +1,30 @@
 import os
 import json
-import stealth_requests as requests
-from urllib.parse import urlparse, parse_qs
+import time
+import random
 from typing import Optional
+from urllib.parse import urlparse, parse_qs
+from tqdm import tqdm
+from rich.console import Console
+from rich.table import Table
+from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, DownloadColumn, TransferSpeedColumn
+import stealth_requests as requests
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'config.json')
 
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/114.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://cnvmp3.com/v25",
+    "authority": "cnvmpp3.com"
+}
+
+console = Console()
 
 def extract_youtube_video_id(url: str) -> Optional[str]:
-    """
-    Extracts the video ID from a YouTube URL using urllib.parse.
-
-    Supports:
-    - https://www.youtube.com/watch?v=VIDEO_ID
-    - https://youtu.be/VIDEO_ID
-    - https://www.youtube.com/embed/VIDEO_ID
-    """
     parsed = urlparse(url)
 
     if parsed.hostname in ('youtu.be',):
@@ -30,10 +39,10 @@ def extract_youtube_video_id(url: str) -> Optional[str]:
 
     return None
 
-def load_api_key():
-    PLACEHOLDER_KEY = 'YOUR_YOUTUBE_API_KEY'
+def load_api_key() -> str:
+    placeholder_key = 'YOUR_YOUTUBE_API_KEY'
     if not os.path.exists(CONFIG_FILE):
-        default_config = {"apiKey": PLACEHOLDER_KEY}
+        default_config = {"apiKey": placeholder_key}
         with open(CONFIG_FILE, 'w') as f:
             json.dump(default_config, f, indent=2)
         print(f"Created {CONFIG_FILE}. Please edit it and add your YouTube API key.")
@@ -42,14 +51,13 @@ def load_api_key():
     with open(CONFIG_FILE, 'r') as f:
         config = json.load(f)
 
-    if not config.get('apiKey') or config['apiKey'] == PLACEHOLDER_KEY:
+    if not config.get('apiKey') or config['apiKey'] == placeholder_key:
         print(f"Please set your YouTube API key in {CONFIG_FILE}.")
         exit(1)
 
     return config['apiKey']
 
-
-def extract_playlist_id_from_url(input_str):
+def extract_playlist_id_from_url(input_str: str) -> str:
     try:
         parsed = urlparse(input_str)
         if parsed.scheme and parsed.netloc:
@@ -62,8 +70,7 @@ def extract_playlist_id_from_url(input_str):
     except Exception as e:
         raise ValueError(f"Invalid input: {e}")
 
-
-def fetch_youtube_playlist_items(api_key, playlist_id):
+def fetch_youtube_playlist_items(api_key: str, playlist_id: str) -> list[str]:
     next_page_token = ''
     video_urls = []
 
@@ -95,14 +102,13 @@ def fetch_youtube_playlist_items(api_key, playlist_id):
 
     return video_urls
 
-def get_check_database_response(check_database_url, video_id):
+def get_check_database_response(url: str, video_id: str) -> Optional[dict]:
     params = {
         "formatValue": 1,
         "quality": 0,
         "youtube_id": video_id
     }
-
-    response = requests.post(check_database_url, json=params)
+    response = requests.post(url, json=params)
 
     if response.status_code != 200:
         raise Exception(f"Check Database Error: {response.text}")
@@ -110,77 +116,151 @@ def get_check_database_response(check_database_url, video_id):
     try:
         return response.json()
     except json.JSONDecodeError:
-        print("Error: Received non-JSON response:")
-        print("Response content:\n", response.text)
-        return
+        print("Error: Received non-JSON response:\n", response.text)
+        return None
 
-def download_mp3(url, filename=None, folder="downloads"):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/114.0.0.0 Safari/537.36",
-        "Referer": "https://cnvmp3.com/"
-    }
-
-    response = requests.get(url, headers=headers, stream=True)
+def download_mp3(url: str, filename: Optional[str] = None, folder: str = "downloads") -> None:
+    response = requests.get(url, headers=HEADERS, stream=True)
 
     if response.status_code != 200:
         raise Exception(f"Failed to download MP3. Status: {response.status_code}\n\n{response.text[:300]}")
 
     if filename is None:
         filename = os.path.basename(url.split("?")[0])
-        
+
     if not filename.endswith(".mp3"):
         filename += ".mp3"
 
     os.makedirs(folder, exist_ok=True)
     file_path = os.path.join(folder, filename)
 
-    with open(file_path, "wb") as f:
+    total_size = int(response.headers.get('content-length', 0))
+    with open(file_path, "wb") as f, Progress(
+        TextColumn("{task.fields[filename]}", justify="right"),
+        BarColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+        transient=True,
+    ) as progress:
+        task = progress.add_task("download", filename=filename, total=total_size)
         for chunk in response.iter_content(chunk_size=8192):
             if chunk:
                 f.write(chunk)
+                progress.update(task, advance=len(chunk))
 
-    print(f"✅ Saved: {file_path}")
+    console.print(f"✅ Saved: {file_path}", style="green")
 
-    
+def get_video_data(url: str) -> dict:
+    api_url = "https://cnvmp3.com/get_video_data.php"
+    response = requests.post(api_url, json={"url": url, "token": "1234"})
 
+    if response.status_code != 200:
+        raise Exception(f"Failed to get video data.\n{response.text}")
 
+    return response.json()
 
-def _download_mp3(url):
-    check_database_url = "https://cnvmp3.com/check_database.php"
+def download_video_ucep(url: str, title: str) -> dict:
+    api_url = "https://cnvmp3.com/download_video_ucep.php"
+    response = requests.post(api_url, headers=HEADERS, json={
+        "url": url,
+        "quality": 0,
+        "title": title,
+        "formatValue": 1
+    })
+
+    if response.status_code != 200:
+        raise Exception(f"Failed download video ucep.\n{response.text}")
+
+    data = response.json()
+    if data.get("success"):
+        print("Downloading")
+        download_mp3(data["download_link"], title)
+
+    return data
+
+def insert_to_database(video_url: str, download_url: str, title: str) -> dict:
+    api_url = "https://cnvmp3.com/insert_to_database.php"
+    video_id = extract_youtube_video_id(video_url)
+
+    response = requests.post(api_url, headers=HEADERS, json={
+        "youtube_id": video_id,
+        "server_path": download_url,
+        "quality": 0,
+        "title": title,
+        "formatValue": 1
+    })
+
+    if response.status_code != 200:
+        raise Exception(f"Failed to insert to database.\n{response.text}")
+
+    data = response.json()
+    if not data.get("success"):
+        raise Exception(f"Failed to insert to database.\n{data['error']}")
+
+    print("Inserted into database")
+    return data
+
+def process_youtube_mp3_download(url: str) -> None:
+    check_db_url = "https://cnvmp3.com/check_database.php"
     video_id = extract_youtube_video_id(url)
 
     if not video_id:
         raise ValueError("Invalid YouTube URL. Could not extract video ID.")
 
-    check_database_response = get_check_database_response(check_database_url, video_id)   
+    db_response = get_check_database_response(check_db_url, video_id)
 
-    if not check_database_response:
+    if not db_response:
         return
 
-    if check_database_response["success"]:
-        download_url = check_database_response["data"]["server_path"]
-        print(download_url)
-        download_mp3(download_url, check_database_response["data"]["title"])
-    
+    if db_response.get("success"):
+        download_url = db_response["data"]["server_path"]
+        title = db_response["data"]["title"]
+        download_mp3(download_url, title)
+    else:
+        video_data = get_video_data(url)
+        if video_data.get("success"):
+            title = video_data["title"]
+            ucep_resp = download_video_ucep(url, title)
+            insert_to_database(url, ucep_resp["download_link"], title)
 
-    
+def preview_playlist_titles(urls: list[str]) -> list[tuple[str, str]]:
+    preview_data = []
+    table = Table(title="YouTube Playlist Download Queue")
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("Title", style="bold")
+    table.add_column("URL", style="magenta")
 
-def main():
+    for idx, url in enumerate(urls, start=1):
+        data = get_video_data(url)
+        title = data.get("title", "Unknown") if data.get("success") else "Unavailable"
+        preview_data.append((title, url))
+        table.add_row(str(idx), title, url)
+        time.sleep(random.uniform(2, 5))
+
+    console.print(table)
+    return preview_data
+
+def main() -> None:
     try:
         api_key = load_api_key()
-        user_input = input("Enter playlist URL or ID: ")
-        playlist_id = extract_playlist_id_from_url(user_input.strip())
-
+        user_input = input("Enter playlist URL or ID: ").strip()
+        playlist_id = extract_playlist_id_from_url(user_input)
         urls = fetch_youtube_playlist_items(api_key, playlist_id)
-        print(f"Fetched {len(urls)} videos:")
-        for url in urls:
-            print(url)
+
+        print(f"Fetched {len(urls)} videos:\n")
+        playlist = preview_playlist_titles(urls)
+
+        for index, (title, url) in enumerate(playlist, start=1):
+            process_youtube_mp3_download(url)
+            time.sleep(random.uniform(2, 5))
+            if index % 5 == 0:
+                print("Cooling down...")
+                time.sleep(10)
+
     except Exception as e:
         print("Error:", str(e))
 
 
 if __name__ == '__main__':
-    #main()
-    _download_mp3("https://www.youtube.com/watch?v=oGIBZ-dc8GE")
+    main()
