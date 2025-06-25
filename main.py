@@ -303,7 +303,7 @@ def main() -> None:
                 time.sleep(10)
 
     except Exception as e:
-        print("Error:", str(e))
+        raise Exception("Error:", str(e))
 
 if __name__ == '__main__':
     main()
